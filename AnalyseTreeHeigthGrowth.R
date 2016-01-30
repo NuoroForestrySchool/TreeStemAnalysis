@@ -3,8 +3,10 @@ rm(list=ls())
 library(sqldf)
 library(latticeExtra)
 
-#source("https://raw.githubusercontent.com/NuoroForestrySchool/TreeStemAnalysis/master/ReadMeasurements.R")
-source("ReadMeasurements.R")
+giturl <- "https://raw.githubusercontent.com/NuoroForestrySchool/TreeStemAnalysis/master/"
+filen <- "ReadMeasurements.R"
+sf <- paste(ifelse(file.exists(filen),"", giturl), filen, sep="") 
+source(sf)
 
 ## Stima di h_sez.
 ## h_sez non è stata misurata in bosco, avendo già misurato con cura le altezze dei palchi 
@@ -82,6 +84,6 @@ Sezioni03 <- sqldf('select IdFusto, ProgSezione, IdSezPalco, NumeroAnelli, h_sez
 Sezioni03 <- sqldf('select A.*, CondConcorrenza, dim as Dimensioni 
                   from Sezioni03 A natural join Fusti')
 
-Sezioni1 <- Sezioni03[order(Sezioni1$IdFusto, Sezioni1$ProgSezione),]
+Sezioni1 <- Sezioni03[order(Sezioni03$IdFusto, Sezioni03$ProgSezione),]
 xyplot(h_sez~Eta_h_sez|Dimensioni*CondConcorrenza, Sezioni1, type="o", grid=T)
 
