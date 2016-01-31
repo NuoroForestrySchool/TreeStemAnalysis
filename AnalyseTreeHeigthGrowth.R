@@ -1,8 +1,10 @@
 # Analizza lo sviluppo in altezza
 rm(list=ls())
+
 library(sqldf)
 library(latticeExtra)
 
+# get the data
 giturl <- "https://raw.githubusercontent.com/NuoroForestrySchool/TreeStemAnalysis/master/"
 filen <- "ReadMeasurements.R"
 sf <- paste(ifelse(file.exists(filen),"", giturl), filen, sep="") 
