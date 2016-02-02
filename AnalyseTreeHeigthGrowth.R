@@ -18,7 +18,7 @@ source(sf)
 ## (per procedere occorre interpretare i campi ProgSezione ed IdSezPalco:
 ##  * le sezioni sono identificate con un numero progressivo, a partire da 1 per la base
 ##  * IdSezPalco riporta (in genere) l'identificativo del palco posto subito sopra la sezione 
-##     salvo nei casi "IdSezPalco %in% c(0.0, 1.3, 999)" 
+##     salvo nei casi "IdSezPalco %in% c(0.0, 130, 999)" 
 ##       che indicano rispettivamente 'base', 'sez.130', 'lunghezza tot'
 ##    le righe con IdSezPalco=999 vengono aggiunte per inserire la lunghezza totale nelle serie)
 ##  * h_sez è quindi la metà tra le altezze dei palchi 'Idpalco' e 'Idpalco'-1!
@@ -46,7 +46,7 @@ source(sf)
 Sezioni01 <- sqldf('
             select A.*, 
            1.0*(CASE WHEN ProgSezione = 1 THEN 0
-                     WHEN IdSezPalco = 1.3 THEN 130
+                     WHEN IdSezPalco = 130 THEN 130
                      ELSE (B1.h_palco + B2.h_palco)/2
                 END) AS h_sez
               from (Sezioni A left outer join Palchi B1 
