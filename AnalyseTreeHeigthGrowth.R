@@ -41,6 +41,7 @@ source(sf)
 ## Sezioni1$Eta_h_sez <- Sezioni1$Eta_h_sez - Sezioni1$NumeroAnelli + .5
 ## ---- ho deciso di procedere sfruttando la standard SQL
 
+### Sviluppo in altezza in base agli anelli contati sulle sezioni
 # Calcola h_sez in base ad h_palco ed aggiungi le cime come sezioni 999
 Sezioni01 <- sqldf('
             select A.*, 
@@ -67,7 +68,7 @@ Sezioni02 <- sqldf('select A.*,
          (select IdFusto, NumeroAnelli as Eta from Sezioni where ProgSezione=1)
        ')
 
-# Calcola Eta_h_sez (prima approssimazione)
+# Calcola Eta_h_sez (seconda approssimazione)
 ## Quando sezioni successive presentano lo stesso numero di anelli, 
 ##  l'approssimazione del mezzo anno non si applica bene, spalmiano!
 multiple.rows <- sqldf('select IdFusto, ProgSezione, Eta_h_sez, count(*) as n, min(ProgSezione) as pSmin 
@@ -82,10 +83,24 @@ Sezioni03 <- sqldf('select IdFusto, ProgSezione, IdSezPalco, NumeroAnelli, h_sez
           END AS Eta_h_sez
        from Sezioni02 left natural join "updated.rows"')
 
-# Aggiungi i descrittori per il grafico
-Sezioni03 <- sqldf('select A.*, CondConcorrenza, dim as Dimensioni 
-                  from Sezioni03 A natural join Fusti')
-
 Sezioni1 <- Sezioni03[order(Sezioni03$IdFusto, Sezioni03$ProgSezione),]
-xyplot(h_sez~Eta_h_sez|Dimensioni*CondConcorrenza, Sezioni1, type="o", grid=T)
+xyplot(h_sez~Eta_h_sez|IdFusto, Sezioni1, type="o", grid=T, layout=c(3,3))
 
+### Sviluppo in altezza - Confronto tra NumeroAnelli, IdPalco ed EtaPalco
+H_growth <- sqldf('select IdFusto, "Eta.sez" as G, Eta_h_Sez as E_oppure_IdPalco, h_sez as H from Sezioni1 
+             UNION select IdFusto, "Id.palco",     IdPalco,                       h_palco from Palchi1 
+             UNION select IdFusto, "Eta.palco",    Eta,                           h_palco from PalchiPrim')
+
+sbs <- unique(Fusti$IdFusto)[2]
+xyplot(H~E_oppure_IdPalco|IdFusto, groups=G, data=H_growth, subset=IdFusto %in% sbs, grid=T,
+       type=c("p","p","p"), par.settings=simpleTheme(
+         pch=c(4,1,5), cex=c(1, 1.5, .3)), auto.key=list(columns=3)) +
+  as.layer(xyplot(H~E_oppure_IdPalco|IdFusto, data=H_growth[H_growth$G=="Eta.palco",], subset=IdFusto %in% sbs, grid=T, t="l"))
+       
+# Aggiungi i descrittori per il grafico
+H_growth1 <- sqldf('select A.*, CondConcorrenza, dim as Dimensioni 
+                  from H_growth A natural join Fusti')
+xyplot(H~E_oppure_IdPalco|CondConcorrenza+Dimensioni, groups=G, data=H_growth1, grid=T,
+       type=c("p","p","p"), par.settings=simpleTheme(
+         pch=c(4,1,5), cex=c(1, 1.5, .3)), auto.key=list(columns=3)) +
+  as.layer(xyplot(H~E_oppure_IdPalco|CondConcorrenza+Dimensioni, data=H_growth1[H_growth1$G=="Eta.palco",], t="l"))
