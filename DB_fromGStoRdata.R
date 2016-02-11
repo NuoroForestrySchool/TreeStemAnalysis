@@ -1,38 +1,38 @@
 library("googlesheets")
+library('sqldf')
 suppressMessages(library(dplyr))
 
 AdF_Pinus.pinaster_Pattada <- gs_title("AdF_Pinus-pinaster_Pattada")
-(t(t(AdF_Pinus.pinaster_Pattada$ws$ws_title)))
-#[1,] "Campagne"            
-#[2,] "UnitaTopografiche"   
-#[3,] "Fusti"               
-#[4,] "Sezioni"             
-#[5,] "Raggi"               
-#[6,] "Palchi"              
-#[7,] "PalchiNonPrimaverili"   
+print(t(t(AdF_Pinus.pinaster_Pattada$ws$ws_title)))
 
+DBstructure <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="DBstructure")
+
+CODICI <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="CODICI")
 Campagne <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="Campagne")
 UnitaTopografiche <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="UnitaTopografiche")
 Fusti <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="Fusti")
-Fusti$CondConcorrenza<-factor(Fusti$CondConcorrenza,ordered=T)
-Fusti <- Fusti[!is.na(Fusti$IdFusto),]
-d <- c("piccolo","medio","grande")
-for(i in levels(Fusti$CondConcorrenza)) 
-  Fusti$dim[Fusti$CondConcorrenza==i] <- 
-  d[rank(Fusti$d_130[Fusti$CondConcorrenza==i], ties.method="first")]
-Fusti$dim <- factor(Fusti$dim, levels=d, ordered=T)
 Sezioni <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="Sezioni")
 Raggi   <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="Raggi")
 Palchi  <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="Palchi")
-PalchiNonPrimaverili<- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="PalchiNonPrimaverili")
+PalchiDaElimEtInserire <- AdF_Pinus.pinaster_Pattada %>% gs_read(ws="PalchiDaElimEtInserire")
 
-Campagne 
-UnitaTopografiche 
-Fusti 
-Sezioni 
-Raggi 
-Palchi
-PalchiNonPrimaverili
+tab_err <- data.frame()
+for (i in 1:nrow(DBstructure)) {
+  tab <- DBstructure$Table[i]
+  PK <- DBstructure$PK[i]
+  dk <- sqldf(paste('select count(*)  from', tab)) - 
+        sqldf(paste('select n from (select distinct', PK, ', count(*) as n from', tab, ')'))
+  if (dk!=0) rbind(tab_err, data.frame(Table=tab, NumDuplicateKeys=dk))
+  }
+if (nrow(tab_err)>0) {
+  print("DB error: duplicate keys!")
+  print(tab_err)
+  stop("Stopping!")
+}
+source("Fusti.R")
+source("Sezioni.R")
+source("Palchi.R")
+source("CongruenzaAnelliPalchi.R")
 
 save(list=AdF_Pinus.pinaster_Pattada$ws$ws_title, 
      file="AdF_Pinus.pinaster_Pattada.Rdata")
