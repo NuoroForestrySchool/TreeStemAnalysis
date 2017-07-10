@@ -1,0 +1,34 @@
+---
+title: "Analisi del fusto semplificata (con poche rotelle)"
+output:
+  html_document: default
+  html_notebook: default
+---
+Podernovo, Consuma, 2017 (la Marca, Rinaldini, et al.)
+Nel corso di una utilizzazione a raso di un impianto di douglasia di circa 50 anni, in un area di 2500 m^2, su 87 fusti ne sono stati scelti 47 per prelevare sezioni (rotelle) tra i toppi individuati dall'operatore in funzione degli assortimenti da produrre.
+
+Analisi preliminare di completezza e congruenza dei rilievi effettuati
+
+```{r}
+wd <- "2017Douglasia-Podernovo"
+if(basename(getwd())!=wd) setwd(wd)
+require(DBI)
+con <- dbConnect(RSQLite::SQLite(),"2017PodernovoDouglasiaProfiliSemplificati_GSapp.sqlite")
+cat("Elenco tabelle contenute nel Data Base\n")
+dbListTables(con)
+tbls <- list("Aree","Rilievi", "Cavallettamento", "FustiAM", "IncHtot", "Rotelle", "AdF")
+tmp<-data.frame()
+for(t in tbls) tmp<-rbind(tmp,data.frame("Table"=t, "Nrows"=nrow(dbReadTable(con,t))))
+cat("Consistenza della base dati\n")
+print(tmp)
+
+```
+
+
+```{r}
+cat("Fusti modello a cui manca l'altezza totale\n")
+t(dbGetQuery(con, "SELECT Id_fusto FROM fUSTIaM where h_tot*1<1 order by Id_fusto*1"))
+
+```
+
+
