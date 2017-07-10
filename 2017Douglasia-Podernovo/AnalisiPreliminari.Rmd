@@ -26,9 +26,18 @@ print(tmp)
 
 
 ```{r}
+FustiAM1 <- dbReadTable(con, "FustiAM")
+require(sqldf)
+FustiAM1[FustiAM1$Id_fusto %in% c(unlist(sqldf("SELECT Id_fusto FROM FustiAM1 where h_tot*1<1 order by Id_fusto*1"))),"htot_missing"] <- TRUE
 cat("Fusti modello a cui manca l'altezza totale\n")
-t(dbGetQuery(con, "SELECT Id_fusto FROM fUSTIaM where h_tot*1<1 order by Id_fusto*1"))
+print(as.character(sort(as.numeric(FustiAM1$Id_fusto[which(FustiAM1$htot_missing)]))))
 
 ```
 
+```{r}
+FustiAM1[FustiAM1$Id_fusto %in% c(unlist(dbGetQuery(con,"SELECT Id_fusto from FustiAM except SELECT Id_fusto from Rotelle where h_rotella=0"))),"base_missing"] <- TRUE
+cat("Fusti modello a cui manca la rotella di base\n")
+print(as.character(sort(as.numeric(FustiAM1$Id_fusto[which(FustiAM1$base_missing)]))))
+
+```
 
