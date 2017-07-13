@@ -4,40 +4,112 @@ output:
   html_document: default
   html_notebook: default
 ---
-Podernovo, Consuma, 2017 (la Marca, Rinaldini, et al.)
-Nel corso di una utilizzazione a raso di un impianto di douglasia di circa 50 anni, in un area di 2500 m^2, su 87 fusti ne sono stati scelti 47 per prelevare sezioni (rotelle) tra i toppi individuati dall'operatore in funzione degli assortimenti da produrre.
+Podernovo, Consuma, 2017 (la Marca, Rinaldini, et al.)  
+Nel corso di una utilizzazione a raso di un impianto di douglasia di circa 50 anni, in un area di 2500 m^2^, tra 87 fusti presenti, ne sono stati selezionati 47 come Alberi Modello.  
+Dagli AM abbattuti, alle estremità dei toppi individuati dall'operatore in funzione degli assortimenti da produrre, sono state prelevate sezioni (rotelle).  
+[Project repository:
+https://github.com/NuoroForestrySchool/TreeStemAnalysis/tree/master/2017Douglasia-Podernovo]
 
-Analisi preliminare di completezza e congruenza dei rilievi effettuati
+[Documentazione struttura base dati: https://docs.google.com/a/uniss.it/document/d/1XvKwF-WxBra7PZ-ooxAcUGMu0ZsKfqYpiE0zPzzQw08/edit?usp=sharing]
 
-```{r}
+## Analisi preliminare di completezza e congruenza dei rilievi effettuati
+
+Base dati
+```{r echo=F}
 wd <- "2017Douglasia-Podernovo"
+dbfn <- "2017PodernovoDouglasiaProfiliSemplificati_GSapp.sqlite"
+cat(" path: ", wd,"\n",
+           "file: ", dbfn)
 if(basename(getwd())!=wd) setwd(wd)
-require(DBI)
-con <- dbConnect(RSQLite::SQLite(),"2017PodernovoDouglasiaProfiliSemplificati_GSapp.sqlite")
-cat("Elenco tabelle contenute nel Data Base\n")
+library(DBI, quietly=T)
+con <- dbConnect(RSQLite::SQLite(),dbfn)
+if(!(dbIsValid(con))) print("ERROR: non database!")
+
+```
+
+
+Elenco tabelle contenute nel Data Base
+```{r echo=F}
 dbListTables(con)
-tbls <- list("Aree","Rilievi", "Cavallettamento", "FustiAM", "IncHtot", "Rotelle", "AdF")
+```
+
+Consistenza della base dati
+```{r echo=F}
+tbls <- list("Aree","Rilievi", "Cavallettamento", "FustiAM", "IncHtot", "Rotelle", "AdF0")
 tmp<-data.frame()
 for(t in tbls) tmp<-rbind(tmp,data.frame("Table"=t, "Nrows"=nrow(dbReadTable(con,t))))
-cat("Consistenza della base dati\n")
 print(tmp)
-
 ```
 
 
-```{r}
-FustiAM1 <- dbReadTable(con, "FustiAM")
-require(sqldf)
-FustiAM1[FustiAM1$Id_fusto %in% c(unlist(sqldf("SELECT Id_fusto FROM FustiAM1 where h_tot*1<1 order by Id_fusto*1"))),"htot_missing"] <- TRUE
-cat("Fusti modello a cui manca l'altezza totale\n")
-print(as.character(sort(as.numeric(FustiAM1$Id_fusto[which(FustiAM1$htot_missing)]))))
+Fusti modello con altezza totale non nota
+```{r echo=F}
+print(t(dbGetQuery(con, "SELECT Id_fusto FROM FustiAM where h_tot*1<1 order by Id_fusto*1")))
 
 ```
 
-```{r}
-FustiAM1[FustiAM1$Id_fusto %in% c(unlist(dbGetQuery(con,"SELECT Id_fusto from FustiAM except SELECT Id_fusto from Rotelle where h_rotella=0"))),"base_missing"] <- TRUE
-cat("Fusti modello a cui manca la rotella di base\n")
-print(as.character(sort(as.numeric(FustiAM1$Id_fusto[which(FustiAM1$base_missing)]))))
+Fusti modello a cui manca la rotella di base
+```{r echo=FALSE}
+print(t(dbGetQuery(con,"SELECT Id_fusto from FustiAM except SELECT Id_fusto from Rotelle where h_rotella=0")))
 
+```
+
+Fusti modello, dati di base [ATTENZIONE: Fusti con anno di nascita recente]
+```{sql connection=con}
+SELECT * FROM FustiAM_eta ORDER BY anno_n DESC
+```
+
+
+Altezza delle rotelle (dei fusti con h_tot nota e rotella di base disponibile)
+```{r echo=FALSE, warning=FALSE}
+library(reshape2, quietly = T)
+Rotelle1 <- dbReadTable(con, "Rotelle")
+fok <- unlist(dbGetQuery(con, "select Id_fusto from FustiAM_eta"))
+tmp <- dcast(Rotelle1[Rotelle1$Id_fusto %in% fok,], Id_fusto ~ Id_rotella, value.var = "h_rotella", fill=" ")
+print(tmp[order(as.numeric(tmp$Id_fusto)*1),], row.names = FALSE)
+```
+
+Misure con incongruenze evidenti (ho ipotizzato delle correzioni, sarebbe bene, verificare sulle rotelle)
+```{r}
+print(dbGetQuery(con, "select Id_fusto, Id_rotella, ripetizione, anno, misura0, misura1 from AdF0 where misura1<>misura0"))
+```
+
+
+Raggi con letture in eccesso
+```{sql connection=con}
+select distinct Id_fusto, Id_rotella, ripetizione, max(anno) from AdF0 group by Id_fusto, Id_rotella, ripetizione having anno>2017;
+
+```
+
+Analisi incrementi estremi
+```{r}
+irmax <- dbGetQuery(con,"select Id_fusto, Id_rotella, ripetizione, anno, max(ir) from CalcolaIncRaggio group by Id_fusto, Id_rotella, ripetizione")
+names(irmax)[length(irmax)] <- "max_ir"
+hist(irmax$anno[irmax$ripetizione=='a'], breaks = max(irmax$anno)-min(irmax$anno)+1)
+hist(irmax$anno[irmax$ripetizione=='b'], breaks = max(irmax$anno)-min(irmax$anno)+1)
+
+```
+
+OSSERVAZIONE: i due grafici non appaiono molto correlati, evito per ora di confondere le ripetizioni!  
+ATTENZIONE: si osserva inoltre una anomala concentrazione di picchi di incremento sull'ultima misura effettuata sulle rotelle
+```{sql connection=con}
+select ripetizione, anno, count() freq from (select Id_fusto, Id_rotella, ripetizione, anno, max(ir) from CalcolaIncRaggio group by Id_fusto, Id_rotella, ripetizione) group by ripetizione, anno having anno>=2010 and ripetizione='b'
+
+```
+
+Livello e variabilità degli incrementi massimi
+```{r}
+library(latticeExtra)
+with(irmax[irmax$ripetizione=='a',], histogram(anno, breaks=max(anno)-min(anno)+1, type="c"))
+library(beanplot)
+with(irmax[irmax$ripetizione=='a',], beanplot(max_ir  ~ anno, main="Media e distribuzione dei valori di Incremento-Massimo", sub="solo ripetizione 'a', Fusti e Rotelle confusi"))
+```
+
+Vista di insieme su tutti gli incrementi
+- solo ripetizione='a'
+```{r}
+ir <- dbReadTable(con, "CalcolaIncRaggio")
+library(latticeExtra)
+with(ir[ir$ripetizione=='a' & ir$Id_fusto<99,], xyplot(ir~anno|as.factor(Id_fusto), group=as.factor(Id_rotella), type="l"))
 ```
 
