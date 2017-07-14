@@ -1,0 +1,39 @@
+---
+title: "Analisi del fusto semplificata (con poche rotelle)"
+output:
+  html_document: default
+  html_notebook: default
+---
+Podernovo, Consuma, 2017 (la Marca, Rinaldini, et al.)  
+Nel corso di una utilizzazione a raso di un impianto di douglasia di circa 50 anni, in un area di 2500 m^2^, tra 87 fusti presenti, ne sono stati selezionati 47 come Alberi Modello.  
+Dagli AM abbattuti, alle estremità dei toppi individuati dall'operatore in funzione degli assortimenti da produrre, sono state prelevate sezioni (rotelle).  
+[Project repository:
+https://github.com/NuoroForestrySchool/TreeStemAnalysis/tree/master/2017Douglasia-Podernovo]
+
+[Documentazione struttura base dati: https://docs.google.com/a/uniss.it/document/d/1XvKwF-WxBra7PZ-ooxAcUGMu0ZsKfqYpiE0zPzzQw08/edit?usp=sharing]
+
+## Analisi dendrocronologiche (time series)
+
+Base dati
+```{r echo=F}
+wd <- "2017Douglasia-Podernovo"
+dbfn <- "2017PodernovoDouglasiaProfiliSemplificati_GSapp.sqlite"
+cat(" path: ", wd,"\n",
+           "file: ", dbfn)
+if(basename(getwd())!=wd) setwd(wd)
+library(DBI, quietly=T)
+con <- dbConnect(RSQLite::SQLite(),dbfn)
+if(!(dbIsValid(con))) print("ERROR: non database!")
+
+```
+
+Vista di insieme su tutti gli incrementi
+- solo ripetizione='a' e Fusti con età ed altezza totale nota
+```{r}
+fu <- dbReadTable(con, "FustiAM_eta")
+ir <- dbReadTable(con, "CalcolaIncRaggio")
+ir <- ir[ir$Id_fusto %in% fu$Id_fusto,]
+library(latticeExtra)
+with(ir[ir$ripetizione=='a' & ir$Id_fusto<99,], xyplot(ir~anno|as.factor(Id_fusto), group=as.factor(Id_rotella), type="l"))
+```
+

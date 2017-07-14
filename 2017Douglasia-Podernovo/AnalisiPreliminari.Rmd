@@ -54,7 +54,7 @@ print(t(dbGetQuery(con,"SELECT Id_fusto from FustiAM except SELECT Id_fusto from
 
 ```
 
-Fusti modello, dati di base [ATTENZIONE: Fusti con anno di nascita recente]
+Fusti modello, dati di base [ATTENZIONE: Fusti con anno di nascita recente da verificare]
 ```{sql connection=con}
 SELECT * FROM FustiAM_eta ORDER BY anno_n DESC
 ```
@@ -69,47 +69,71 @@ tmp <- dcast(Rotelle1[Rotelle1$Id_fusto %in% fok,], Id_fusto ~ Id_rotella, value
 print(tmp[order(as.numeric(tmp$Id_fusto)*1),], row.names = FALSE)
 ```
 
-Misure con incongruenze evidenti (ho ipotizzato delle correzioni, sarebbe bene, verificare sulle rotelle)
-```{r}
-print(dbGetQuery(con, "select Id_fusto, Id_rotella, ripetizione, anno, misura0, misura1 from AdF0 where misura1<>misura0"))
+
+Rotelle con 'ripetizione=b' diversa da 'a' 
+(occorre verificare i casi in cui la 'diff' è negativa e comunque quando la nota è vuota)
+```{sql connection=con, max.print=NA}
+SELECT A.Id_fusto,
+       A.Id_rotella,
+       A.num_inc num_inc_a,
+       B.num_inc num_inc_b,
+       A.num_inc - B.num_inc diff,
+       B.note
+  FROM SintesiRotelleDaAdF A
+       LEFT JOIN
+       SintesiRotelleDaAdF B USING (
+           Id_fusto,
+           Id_rotella
+       )
+ WHERE A.ripetizione = 'a' AND 
+       B.ripetizione = 'b' AND 
+       num_inc_a <> num_inc_b;
+
 ```
 
-
-Raggi con letture in eccesso
+Dettaglio da sopra, raggi con letture in eccesso: arrivano al 2018!
 ```{sql connection=con}
 select distinct Id_fusto, Id_rotella, ripetizione, max(anno) from AdF0 group by Id_fusto, Id_rotella, ripetizione having anno>2017;
 
 ```
 
-Analisi incrementi estremi
-```{r}
-irmax <- dbGetQuery(con,"select Id_fusto, Id_rotella, ripetizione, anno, max(ir) from CalcolaIncRaggio group by Id_fusto, Id_rotella, ripetizione")
-names(irmax)[length(irmax)] <- "max_ir"
-hist(irmax$anno[irmax$ripetizione=='a'], breaks = max(irmax$anno)-min(irmax$anno)+1)
-hist(irmax$anno[irmax$ripetizione=='b'], breaks = max(irmax$anno)-min(irmax$anno)+1)
 
+Misure con incongruenze evidenti (ho ipotizzato delle correzioni, sarebbe bene, verificare sulle rotelle: 'misura0' dovrebbe essere la tua misura, 'misura1' è il valore modificato da me)
+```{r}
+print(dbGetQuery(con, "select Id_fusto, Id_rotella, ripetizione, anno, misura0, misura1 from AdF0 where misura1<>misura0"))
 ```
 
-OSSERVAZIONE: i due grafici non appaiono molto correlati, evito per ora di confondere le ripetizioni!  
+
+Analisi incrementi estremi
+("le variazioni annuali di incremento sono tra loro sincronizzate?   
+Proviamo a vedere come sono distribuiti nel campione gli incrementi massimi.")  
+
+Livello e variabilità degli incrementi massimi
+```{r}
+irmax <- dbGetQuery(con,"select Id_fusto, Id_rotella, ripetizione, anno, max(ir) max_ir from CalcolaIncRaggio group by Id_fusto, Id_rotella, ripetizione")
+library(latticeExtra, quietly=T)
+with(irmax[irmax$ripetizione=='a',], histogram(anno, breaks=max(anno)-min(anno)+1, type="c"))
+library(beanplot, quietly=T)
+with(irmax[irmax$ripetizione=='a',], beanplot(max_ir  ~ anno, main="Media e distribuzione dei valori di Incremento-Massimo", sub="solo ripetizione 'a', Fusti e Rotelle confusi"))
+```
+
+OSSERVAZIONE: i due istogrammi (relativi a 'ripetizione' 'a', sopra, e 'b', sotto) non appaiono molto correlati, evito quindi, per ora di confondere le ripetizioni! 
+```{r}
+with(irmax[irmax$ripetizione=='b',], histogram(anno, breaks=max(anno)-min(anno)+1, type="c"))
+
+```
 ATTENZIONE: si osserva inoltre una anomala concentrazione di picchi di incremento sull'ultima misura effettuata sulle rotelle
 ```{sql connection=con}
 select ripetizione, anno, count() freq from (select Id_fusto, Id_rotella, ripetizione, anno, max(ir) from CalcolaIncRaggio group by Id_fusto, Id_rotella, ripetizione) group by ripetizione, anno having anno>=2010 and ripetizione='b'
 
 ```
 
-Livello e variabilità degli incrementi massimi
-```{r}
-library(latticeExtra)
-with(irmax[irmax$ripetizione=='a',], histogram(anno, breaks=max(anno)-min(anno)+1, type="c"))
-library(beanplot)
-with(irmax[irmax$ripetizione=='a',], beanplot(max_ir  ~ anno, main="Media e distribuzione dei valori di Incremento-Massimo", sub="solo ripetizione 'a', Fusti e Rotelle confusi"))
-```
 
 Vista di insieme su tutti gli incrementi
 - solo ripetizione='a'
 ```{r}
 ir <- dbReadTable(con, "CalcolaIncRaggio")
-library(latticeExtra)
+library(latticeExtra, quietly=T)
 with(ir[ir$ripetizione=='a' & ir$Id_fusto<99,], xyplot(ir~anno|as.factor(Id_fusto), group=as.factor(Id_rotella), type="l"))
 ```
 
