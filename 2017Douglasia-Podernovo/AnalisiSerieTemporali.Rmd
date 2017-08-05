@@ -1,0 +1,85 @@
+---
+title: "Analisi del fusto semplificata (con poche rotelle)"
+!!! non finito !!!
+output:
+  html_document: default
+  html_notebook: default
+---
+Podernovo, Consuma, 2017 (la Marca, Rinaldini, et al.)  
+Nel corso di una utilizzazione a raso di un impianto di douglasia di circa 50 anni, in un area di 2500 m^2^, tra 87 fusti presenti, ne sono stati selezionati 47 come Alberi Modello.  
+Dagli AM abbattuti, alle estremità dei toppi individuati dall'operatore in funzione degli assortimenti da produrre, sono state prelevate sezioni (rotelle).  
+[Project repository:
+https://github.com/NuoroForestrySchool/TreeStemAnalysis/tree/master/2017Douglasia-Podernovo]
+
+[Documentazione struttura base dati: https://docs.google.com/a/uniss.it/document/d/1XvKwF-WxBra7PZ-ooxAcUGMu0ZsKfqYpiE0zPzzQw08/edit?usp=sharing]
+
+## Analisi dendrocronologiche (time series)
+
+Base dati
+```{r echo=F}
+wd <- "2017Douglasia-Podernovo"
+dbfn <- "2017PodernovoDouglasiaProfiliSemplificati_GSapp.sqlite"
+cat(" path: ", wd,"\n",
+           "file: ", dbfn)
+if(basename(getwd())!=wd) setwd(wd)
+library(DBI, quietly=T)
+con <- dbConnect(RSQLite::SQLite(),dbfn)
+if(!(dbIsValid(con))) print("ERROR: non database!")
+
+```
+
+Testing DTW
+```{r}
+ir <- dbReadTable(con, "CalcolaIncRaggio")
+
+ir <- ir[with(ir, order(Id_fusto, Id_rotella, ripetizione, anno)),]
+
+library(dtw)
+## > is.dtw
+## Error: object 'is.dtw' not found
+my.is.dtw <- function(a) inherits(a, "dtw")
+library(latticeExtra)
+
+for(idf in unique(ir$Id_fusto)[33]) {
+  for(idr in unique(ir$Id_rotella[ir$Id_fusto==idf])[7]) {
+  ir1 <- ir[ir$Id_fusto==idf & ir$Id_rotella==idr,]
+  templ <- ir1[ir1$ripetizione=='a', c("anno", "ir")]
+  query <- ir1[ir1$ripetizione=='b', c("anno", "ir")]
+  ir.ts <- merge(templ, query, by="anno", all=T, suffixes = c(".t", ".q"))
+  ir.ts <- ts(ir.ts[,-1], start = ir.ts$anno[1], names=c("templ", "query"))
+
+cat(idf, idr," - ")
+stpps <- c("symmetric1"
+,"symmetric2"
+,"asymmetric"
+,"rabinerJuangStepPattern(6, 'c')"
+)
+for(stpp in stpps[c(4)]) {
+alg <- tryCatch(
+  dtw(window(ir.ts[,"query"], ir.ts[,"templ"],end=2016),keep=TRUE
+      , step.pattern=eval(parse(text=stpp))
+) #      , open.begin=T, open.end=T)
+  , error = function(e) cat(" -ERROR in dtw- ")
+  , finally = NA)
+cat(" test:",my.is.dtw(alg),": ")
+if(my.is.dtw(alg)) {
+  cat(fivenum(alg$index1-alg$index2),"\n")
+  plot(alg, type="twoway",offset=-1.4*max(abs(ir.ts[,"query"]-ir.ts[,"templ"]))
+       , xlab='2017-anno', ylab='inc_raggio') 
+} else {
+  ir1$ir[ir1$ripetizione=='b'] <-1.52+ir1$ir[ir1$ripetizione=='b']
+  print(
+    xyplot(ir.ts, col=c('red', 'blue'), superpose = T, grid=T
+    , main=paste("Fusto:",idf,"- Rot:", idr
+                 , "- lungh.a =", nrow(templ),"e .b =", nrow(query)))
+  )
+}
+title(main=paste("F",idf,"-R", idr, " (", alg$N, "x", alg$M, ")"
+                 , " ndist=", round(alg$normalizedDistance,3), sep="")
+      ,sub = stpp)
+}
+}
+}
+
+```
+
