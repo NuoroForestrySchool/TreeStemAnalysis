@@ -1,0 +1,52 @@
+---
+title: "From basic Google Sheets tables to SQLite db"
+output: html_notebook
+---
+
+Rinaldini registered the tree rings measurements as groups of lines,
+one line per section, one group for tree.
+Measurements are progressive, from bark (or underbark if missing),
+coded by modifying character format (bold for bark, red for the two measurements with pith -not measured- in between)
+Having used format attributes to code info, direct data extraction (say via CSV) is not viable since formatting would be lost. Google scripts have been developed in order to transfer original information in explicit tables: one listing sections data (section distance from tree base: s_height), the other with one line for each measurement, exlicitly connecting it with: TreeId, row (hence section), col (hence year of growth), is-bold and is-red.
+Such raw tables have to be further processed to:
+* directly connect to a meaningful SectionId
+* distinguish measurements before and after pith
+* explicitly connect each measurements with 'year of growth'
+* set bark apart
+* compute ring widths
+
+[Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. ]
+
+Connect to GS
+(https://cran.r-project.org/web/packages/googlesheets/vignettes/basic-usage.html)
+```{r}
+library(googlesheets)
+suppressMessages(library(dplyr))
+gsn <- "RotelleVer2"
+gsurl <- "https://docs.google.com/spreadsheets/d/15ZLnI780oKr4QKuc4k4UAwZ6w6YmEE8tj4c2sU44xLQ/edit#gid=1996889235"
+gs_ls(gsn)
+Rv2 <- gs_url(gsurl)
+Sects <- Rv2 %>%  gs_read(ws = "Sections")
+Diams <- Rv2 %>%  gs_read(ws = "Diameters")
+```
+
+Verify basic characteristics:
+A) are the mesurements, within each section, progressive?
+(Non progressive measurements within each section are evidenced in the Google script pahase, and should already have been corrected before this pahase)
+B) each section has to have exactly two 'red' measurements?
+C) all section ('row') in Diams are present in Sects?
+```{r}
+library(sqldf)
+print(paste("A) n. of non-progressive meas.:",nrow(sqldf("select A.TreeId, A.row, A.col, B.col, A.value, B.Value, B.value - A.Value inc0 from Diams A join Diams B on A.TreeId = B.TreeId and A.row = B.row and A.col +1 = B.col where inc0<=0"))))
+print(paste("B) n. of missing 'red' couples:", nrow(sqldf("select TreeId, row, count(*) n_red from (select * from Diams where red) group by TreeId, row having n_red <> 2"))))
+print(paste("C) n. of missing sections:", nrow(sqldf("
+  select * from (select distinct row from Diams) left natural join Sects where TreeId is NULL
+                 "))))
+
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
