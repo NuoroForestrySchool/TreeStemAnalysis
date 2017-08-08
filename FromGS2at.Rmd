@@ -1,0 +1,93 @@
+---
+title: Processing Rinaldini's 'stem analysis' measurements - From basic Google Sheets tables to analysis ready tables
+output:
+  html_document: default
+  html_notebook: default
+---
+
+Rinaldini registered the tree rings measurements as groups of lines,
+one line per section, one group for tree.
+Measurements are progressive, from bark (or underbark if missing),
+coded by modifying character format (bold for bark, red for the two measurements with pith -not measured- in between)
+Having used format attributes to code info, direct data extraction (say via CSV) is not viable since formatting would be lost. Google scripts have been developed in order to transfer original information in explicit tables: one listing sections data (section distance from tree base: s_height), the other with one line for each measurement, explicitly connecting it with: TreeId, row (hence section), col (hence year of growth), is-bold and is-red.
+Such raw tables have to be further processed to:  
+* directly connect to a meaningful SectionId  
+* distinguish measurements before and after pith  
+* explicitly connect each measurements with 'year of growth'  
+* set bark apart  
+* compute ring widths  
+  
+## Connect to GS
+(https://cran.r-project.org/web/packages/googlesheets/vignettes/basic-usage.html)
+```{r, message=FALSE, warning=TRUE}
+library(googlesheets)
+suppressMessages(library(dplyr))
+gsn <- "RotelleVer2"
+gsurl <- "https://docs.google.com/spreadsheets/d/15ZLnI780oKr4QKuc4k4UAwZ6w6YmEE8tj4c2sU44xLQ/edit#gid=1996889235"
+gs_ls(gsn)
+Rv2 <- gs_url(gsurl)
+Sects0 <- Rv2 %>%  gs_read(ws = "Sections", progress=F)
+Diams0 <- Rv2 %>%  gs_read(ws = "Diameters", progress=F)
+```
+
+## Verify basic characteristics  
+A) Are the mesurements, within each section, progressive?  
+(Non progressive measurements within each section are evidenced in the Google script pahase, and should already have been corrected before this pahase)  
+B) Each section has exactly two consecutive 'red' measurements?  
+C) All sections ('row') in Diams_at are present in Sects_at table?  
+```{r, message=FALSE, warning=FALSE}
+library(sqldf, quietly=F)
+Sects_at <- Sects0
+Diams_at <- Diams0
+cat(paste("A) n. of non-progressive measures:",nrow(sqldf("
+  select A.TreeId, A.row, A.col, B.col, A.value, B.Value, B.value - A.Value inc0 from Diams_at A join Diams_at B on A.TreeId = B.TreeId and A.row = B.row and A.col +1 = B.col where inc0<=0 "))))
+
+cat(paste("B1) n. of sections without a 'red' couple:", nrow(sqldf("
+  select TreeId, row, count(*) n_red from (select * from Diams_at where red) group by TreeId, row having n_red <> 2    "))))
+
+cat(paste("B2) n. of not consecutive 'red' couples:", nrow(sqldf("
+  select TreeId, row, min(col) a_max, max(col) b_min, max(col)-min(col) d from (select * from Diams_at A where red) group by TreeId, row having d <> 1"))))
+
+cat(paste("C) n. of 'sections Id' in Diam missing in Sects_at table:", nrow(sqldf("
+  select * from (select distinct row from Diams_at) left natural join Sects_at where TreeId is NULL or s_height is NULL  "))))
+```
+
+## Complete tables for sections and diameters
+```{r, warning=FALSE}
+source('FromGS2at.R')
+```
+
+## Verify measurements internal coherence
+```{r, echo=FALSE}
+x <- "select A.TreeId, A.SectId, A.nam, B.SectId, B.nam, A.nam-B.nam diff from Sects_sy A join Sects_sy B on A.TreeId=B.TreeId and A.SectId+1=B.SectId where diff<0"
+n <- nrow(sqldf(x))
+cat(paste("A) section above has more rings than the one below \n   n. of non compatible couples of sections:", n))
+if (n>0) sqldf(x)
+
+cat(paste("B0) WARNING: if 'TRUE' successive tests are unreliable:", !comments_ok))
+
+# if (comments_ok) { ## see closure
+
+  cat(paste("B1)  n. of 'implicitly complete sections (i.e. 'side b' has no bark but also no 'comment'):",nrow(sqldf("
+        select * from Sects_sy where not bbark and comment is NULL"))))
+    # these are included as 'complete'
+
+  cat(paste("B2)  n. of 'complete' sections:", sum(Sects_sy$complete)," - out of:", nrow(Sects_at)))
+  
+  cat("B3)  List of sections signalled as NOT 'complete' (i.e. with 'comment) that actually seem complete:")
+  sqldf("select * from Sects_sy where not complete and max_b_year = 2017")
+
+  cat(paste("C1)  n. of 'complete' with matching sides:", sum(Sects_sy$complete & Sects_sy$max_b_year == cutting_year)))
+  
+  n <- sum(Sects_sy$complete & Sects_sy$max_b_year != cutting_year)
+  cat(paste("C2)  n. of 'complete' with NON matching sides:", n))
+  if (n<=10) {
+    cat(paste(" list of 'complete' with NON matching sides:"))
+    cat(sqldf("select * from Sects_sy where complete and max_b_year <> 2017"))
+  }
+# }  ## with active <if> the table is cancelled from the output
+
+#save(Sects_at, Diams_at, file="RinaldiniV2.0.Rdata")
+# }  ## with active <if> the table gets cancelled from the output
+```
+

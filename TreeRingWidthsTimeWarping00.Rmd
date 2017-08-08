@@ -1,0 +1,45 @@
+---
+title: "Tree ring analysis - coupling measurement series taken on opposite sides of the pith that differ for one ring"
+output: html_notebook
+---
+[bozza non finita]
+
+## Aim
+Yearly measurements have been taken on almost 200 stem sections in a 'simplified' stem analysis study. (Simplified in the sense that sections have been cut adapting to foresters needs, at tree base and at the top of the long commercial logs he defined, not at researcher defind positions).
+Measurement procedure and data imput method didn't oblige to take care of readings internal coherence and, acually, of the more than 150 measurements seriese that could effectively proceed from one side of the stem till the opposite side, 140 series present a common incoherence problem: the number of rings on the two sides of the pith differ for one year.  
+To proceed with the original stem analysis work, ecah of these series has to be corrected either,  
+(I) inserting a missing mesurement in the short side,  
+(D) deliting a measurement in excess in the long one.  
+Aim of the work performed here is to identify the locations within such series where (D) or (I) would best improve the matching between the series taken from opposite sides of the stem.  
+Measurements have been taken as progressive values. Assuming that total width section is correctly mesured, in order to preserve all other readings not affected by the correction, (I) and (D) respectvely imply that:  
+(I) the width of a given ring is divided in two (let us assume, equal) parts  
+(D) the width of two consecutive rings are summed to form a single one  
+
+## Evaluating matching indicators
+Dynamic Time Warping (DTW) is a well known approach to time series matching, see  
+https://en.wikipedia.org/wiki/Dynamic_time_warping  
+or http://www.cs.ucr.edu/~eamonn/DTW_myths.pdf for a more critical appraisal.  
+Although the general approach can be applyed in this context, the problem at hand requires has specific constraints that, as far as I could appreciate, can not be implemented using available packages or algorithms:  
+1) in this case a single correcion (I or D) is allowed and required,  
+2) what has to be evaluated is the 'match gain' after correction, i.e. after having modified (by summation or halving) the single series values.  
+Moreover in DTW the focus is on 'point to point' distances (however the metric is defined), and 'warping' is led by 'distance minimization', with no concern for local matching. To overcome this limitation a 'shape DTW' approach has been developed but the procedures are available only as code for Matlab (paper: https://arxiv.org/pdf/1606.01601.pdf, code: https://github.com/jiapingz/shapeDTW). Other approaches have been proposed but I couldn't find any implementation (https://pdfs.semanticscholar.org/98cc/ff83a8c815eed2f3978a47a331373baf332a.pdf).
+In this work local correlation is considered as viable approach to take 'local shapes' into consideration.  
+
+
+```{r}
+load("DiamsV2.0.Rdata")
+# compute Sections synthesis
+Sects_sy <- sqldf("select TreeId, SectId, sum(side='a' and bark) abark, sum(side='a' and not bark) nam, sum(side='b' and not bark) nbm, sum(side='b' and bark) bbark, count(*) as nm from Diams group by TreeId, SectId order by TreeId, SectId")
+
+  if (!('comment' %in% names(Sects_sy))) {
+    Sects_sy <- sqldf("select A.*, B.comment from Sects_sy A natural left join Sects B")
+  }
+  Sects_sy$complete <- Sects_sy$bbark | is.na(Sects_sy$comment)
+
+  if (!('max_b_year' %in% names(Sects_sy))) {
+    Sects_sy <- sqldf("select * from Sects_sy natural join (select TreeId, SectId, max(year) max_b_year from (select * from Diams where side='b') group by TreeId, SectId)")
+  }
+
+```
+
+
