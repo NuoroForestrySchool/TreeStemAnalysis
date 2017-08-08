@@ -29,6 +29,7 @@ gs_ls(gsn)
 Rv2 <- gs_url(gsurl)
 Sects <- Rv2 %>%  gs_read(ws = "Sections", progress=F)
 Diams <- Rv2 %>%  gs_read(ws = "Diameters", progress=F)
+<<<<<<< HEAD
 ```
 
 ## Verify basic characteristics  
@@ -112,6 +113,91 @@ n <- nrow(sqldf(x))
 cat(paste("A) section above has more rings than the one below \n   n. of non compatible couples of sections:", n))
 if (n>0) sqldf(x)
 
+=======
+```
+
+## Verify basic characteristics  
+A) Are the mesurements, within each section, progressive?  
+(Non progressive measurements within each section are evidenced in the Google script pahase, and should already have been corrected before this pahase)  
+B) Each section has exactly two consecutive 'red' measurements?  
+C) All sections ('row') in Diams are present in Sects table?  
+```{r, message=FALSE, warning=FALSE}
+library(sqldf, quietly=F)
+cat(paste("A) n. of non-progressive measures:",nrow(sqldf("
+  select A.TreeId, A.row, A.col, B.col, A.value, B.Value, B.value - A.Value inc0 from Diams A join Diams B on A.TreeId = B.TreeId and A.row = B.row and A.col +1 = B.col where inc0<=0 "))))
+
+cat(paste("B1) n. of sections without a 'red' couple:", nrow(sqldf("
+  select TreeId, row, count(*) n_red from (select * from Diams where red) group by TreeId, row having n_red <> 2    "))))
+
+cat(paste("B2) n. of not consecutive 'red' couples:", nrow(sqldf("
+  select TreeId, row, min(col) a_max, max(col) b_min, max(col)-min(col) d from (select * from Diams A where red) group by TreeId, row having d <> 1"))))
+
+cat(paste("C) n. of 'sections Id' in Diam missing in Sects table:", nrow(sqldf("
+  select * from (select distinct row from Diams) left natural join Sects where TreeId is NULL or s_height is NULL  "))))
+```
+
+## Complete tables for sections and diameters
+```{r, warning=FALSE}
+# In Sects: add numeric section height attribute
+x <- as.numeric(Sects$s_height) 
+Sects$s_height_n <- ifelse(is.na(x), 0, x) 
+
+# In Sects: add tree level progressive SectionId
+if (!('SectId' %in% names(Sects))) {
+  Sects <- sqldf("select A.*, count(*) SectId from Sects A join Sects B on A.TreeId=B.TreeId and A.S_height_n >= B.s_height_n group by A.TreeId, A.row order by A.TreeId, A.S_height_n")
+}
+
+# In Diams: add SectId reference
+if (!('SectId' %in% names(Diams))) {
+  Diams <- sqldf("select A.*, SectId from Diams A left join Sects B using(row)")
+}
+
+# Pull out 'comments' from Diams
+Sects_comments <- sqldf("select row, col, TreeId, SectId, comment from Diams where value is NULL")
+Diams <- sqldf("select * from Diams where value is not NULL")
+
+# In Diams: distinguish measurements before (a) and after (b) the pith
+if (!('side' %in% names(Diams))) {
+  Diams <- sqldf("select A.*, case when col <= a_max then 'a' else 'b' end side from Diams A natural join (select TreeId, SectId, min(col) a_max from (select * from Diams A where red) group by TreeId, SectId) B ")
+}
+
+# In Diams: add 'year of growth', select and reorder attributes
+cutting_year <- 2017
+if (!('year' %in% names(Diams))) {
+  # col expresses the progression of measurements, to get the actual year 
+  # consider following cases:
+  # A1 - section starts with bold: 1st measuremen is under bark, year=cutting year
+  # A2 - section starts without bold: 1st measuremen is under first ring, year=c.year-1
+  # B - till pith (first red) year decreases
+  # C - for 1st measurements after pith (2nd red) year = year of 'first red'
+  # D - for successive measurements year increases
+  
+  # for side = 'a', year = cutting_year - (col - min_col)
+  # if 1st meas. is bark, meas. includes cutting year growth, year = c.year
+  # else, 1st meas. excludes cutting year, year = c.year -1
+  tmp <- sqldf(" select TreeId, SectId, side, case when side='a' and not A.bold then A.col-1 else a.col end min_col from Diams A natural join (select TreeId, SectId, side, min(col) col from Diams group by TreeId, SectId, side) B ")
+  tmp <- sqldf(" select A.*, col-min_col ry from Diams A natural join tmp B ")
+  tmp[tmp$side=='a','year'] <- cutting_year - tmp[tmp$side=='a','ry']
+  
+  # process side = 'b'
+  tmp <- sqldf("select A.*, min_year from tmp A natural left join (select TreeId, SectId, min(year) min_year from (select * from tmp where side='a') group by TreeId, SectId) B ")
+  tmp[tmp$side=='b','year'] <- tmp[tmp$side=='b','min_year'] + tmp[tmp$side=='b','ry']
+  tmp[tmp$side=='b' & tmp$bold,'year'] <- NA
+  Diams <- sqldf("select row, col, TreeId, SectId, side, year, bold=1 bark, value from tmp")
+}
+```
+
+## Verify measurements internal coherence
+```{r, echo=FALSE}
+# compute Sectios synthesis
+Sects_sy <- sqldf("select TreeId, SectId, sum(side='a' and bark) abark, sum(side='a' and not bark) nam, sum(side='b' and not bark) nbm, sum(side='b' and bark) bbark, count(*) as nm from Diams group by TreeId, SectId order by TreeId, SectId")
+
+x <- "select A.TreeId, A.SectId, A.nam, B.SectId, B.nam, A.nam-B.nam diff from Sects_sy A join Sects_sy B on A.TreeId=B.TreeId and A.SectId+1=B.SectId where diff<0"
+n <- nrow(sqldf(x))
+cat(paste("A) section above has more rings than the one below \n   n. of non compatible couples of sections:", n))
+if (n>0) sqldf(x)
+
+>>>>>>> 0ae48324611a266b12028fb28466447f3562b279
 comments_ok <- nrow(unique(Sects_comments[,1:2])) == nrow(Sects_comments[,1:2])
 cat(paste("B0) if 'TRUE' successive tests are unreliable:", !comments_ok))
 # if (comments_ok) { ## see closure
@@ -141,8 +227,12 @@ cat(paste("B0) if 'TRUE' successive tests are unreliable:", !comments_ok))
     cat(paste(" list of 'complete' with NON matching sides:"))
     cat(sqldf("select * from Sects_sy where complete and max_b_year <> 2017"))
   }
+<<<<<<< HEAD
 # }  ## with active <if> the table is cancelled from the output
 
 #save(Diams,file="DiamsV2.0")
+=======
+# }  ## with active <if> the table gets cancelled from the output
+>>>>>>> 0ae48324611a266b12028fb28466447f3562b279
 ```
 
