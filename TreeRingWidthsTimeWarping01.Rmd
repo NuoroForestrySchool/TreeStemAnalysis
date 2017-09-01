@@ -1,0 +1,267 @@
+---
+title: Tree ring analysis - coupling measurement series taken on opposite sides of the pith with one ring difference
+output:
+  html_document: default
+  html_notebook: default
+---
+
+## Aim
+Yearly measurements have been taken on almost 200 stem sections in a 'simplified' stem analysis study. (Simplified in the sense that sections have been cut adapting to foresters needs, at tree base and at the top of the long commercial logs he defined, not at researcher defind positions).
+Measurement procedure and data imput method didn't oblige to take care of readings internal coherence and, atcually, of the more than 150 measurements seriese that could effectively proceed from one side of the stem till the opposite side, 140 series present a common incoherence problem: the number of rings on the two sides of the pith differ for one year.  
+To proceed with the original stem analysis work, ecah of these series has to be corrected either,  
+(I) inserting a missing mesurement in the short side,  
+(D) deliting a measurement in excess in the long one.  
+Aim of the work performed here is to identify the locations within such series where (D) or (I) would best improve the matching between the series taken from opposite sides of the stem.  
+Measurements have been taken as progressive values. Assuming that total width section is correctly mesured, in order to preserve all other readings not affected by the correction, (I) and (D) respectvely imply that:  
+(I) the width of a given ring is divided in two (let us assume, equal) parts  
+(D) the width of two consecutive rings are summed to form a single one  
+
+## Evaluating matching indicators
+Dynamic Time Warping (DTW) is a well known approach to time series matching, see  
+https://en.wikipedia.org/wiki/Dynamic_time_warping  
+or http://www.cs.ucr.edu/~eamonn/DTW_myths.pdf for a more critical appraisal.  
+Although the general approach can be applyed in this context, the problem at hand requires has specific constraints that, as far as I could appreciate, can not be implemented using available packages or algorithms:  
+1) in this case a single correcion (I or D) is allowed and required,  
+2) what has to be evaluated is the 'match gain' after correction, i.e. after having modified (by summation or halving) the single series values.  
+Moreover in DTW the focus is on 'point to point' distances (however the metric is defined), and 'warping' is led by 'distance minimization', with no concern for local matching. To overcome this limitation a 'shape DTW' approach has been developed but the procedures are available only as code for Matlab (paper: https://arxiv.org/pdf/1606.01601.pdf, code: https://github.com/jiapingz/shapeDTW). Other approaches have been proposed but I couldn't find any implementation (https://pdfs.semanticscholar.org/98cc/ff83a8c815eed2f3978a47a331373baf332a.pdf).
+In this work local correlation is considered as viable approach to take 'local shapes' into consideration.  
+
+## Compute Sections synthesis (final code of 'FromGS2at.R') and Ring Widths
+```{r}
+load("RinaldiniV2.0.Rdata")
+library(sqldf)
+Sects_sy <- sqldf("select TreeId, SectId
+                  , sum(side='a' and bark) abark, sum(side='a' and not bark) nam
+                  , sum(side='b' and not bark) nbm, sum(side='b' and bark) bbark
+                  , count(*) as nm 
+                  from Diams_at group by TreeId, SectId order by TreeId, SectId")
+Sects_sy <- sqldf("
+                select A.*, B.comment 
+                  from Sects_sy A natural left join Sects_at B")
+Sects_sy$complete <- Sects_sy$bbark | is.na(Sects_sy$comment)
+Sects_sy <- sqldf("
+              select * from Sects_sy natural join 
+                (select TreeId, SectId, max(year) max_b_year
+                 from (select * from Diams_at where side='b') 
+                   group by TreeId, SectId)")
+
+pith <- sqldf("
+              select A.TreeId, A.SectId, year-1 year, avg(value) value 
+              from Diams_at A natural join (
+                select TreeId, SectId, side, min(year) year 
+                from Diams_at group by TreeId, SectId, side)
+              group by TreeId, SectId")
+
+missing_bark <- sqldf("
+              select TreeId, SectId, 'a' side, 2017 year, 0 value 
+              from Sects_sy where abark=0")
+
+tmp <- sqldf("
+              select TreeId, SectId, side, year, value 
+              from Diams_at where not (side='b' and bark) 
+              UNION select TreeId, SectId, 'a' side, year, value from pith 
+              UNION select TreeId, SectId, 'b' side, year, value from pith 
+              UNION select TreeId, SectId, side, year, value from missing_bark")
+
+rw_all <- sqldf("
+              select A.TreeId, A.SectId, A.side, A.year gyear
+                , case when A.side='a' then B.value-A.value else A.value-B.value end rw 
+              from tmp A join tmp B 
+                on A.TreeId=B.TreeId and A.SectId=B.SectId and A.side=B.side
+                   and A.year=B.year+1")
+
+# dubbio: la corteccia b non è inclusa come rw vero?
+# verifica: NO (year è messo ad NA e quindi non aggancia nell'accoppiamento)
+
+```
+
+## Evaluating similarity measures
+```{r}
+library(latticeExtra)
+# library(TTR)
+#    tested but abanoned because:
+#    1 - numeric instability (NaN sometimes when x or y constant)
+#    2 - lagged result (result[n] corresponds to x_y[n/2])
+# substituted with a custom 'localCor()' function
+source('F_localCor.R')
+
+tmp <- sqldf("select A.* from rw_all A natural join Sects_sy where max_b_year = 2017")
+rw_ok <- sqldf("select A.*, A.rw/series_width rrw from tmp A natural join (select TreeId, SectId, side, sum(rw) series_width from tmp group by TreeId, SectId, side)")
+xyplot(rw ~ gyear | paste(TreeId,SectId,sep="-"), rw_ok, group = side, t='l', main="'a' and 'b' Series of sections where lengths are equal")
+
+rw_cor <- sqldf("select TreeId, SectId, gyear
+                       , A.rrw rrw_a, B.rrw rrw_b 
+                  from (select * from rw_ok where side='a') A 
+                    join (select * from rw_ok where side='b') B
+                    using(TreeId, SectId, gyear)")
+ts <- with(rw_cor, paste(TreeId, SectId, sep="-"))
+for (i in unique(ts)) {
+#  print(i)
+  rw_cor$rw_ab_cor[ts==i] <- with(rw_cor[ts==i,]
+                                  , localCor(rrw_a, rrw_b, 3))
+}
+#  rrw_a+rrw_b+
+obj1 <- xyplot(I(rrw_a - rrw_b)^2  ~ gyear| ts, rw_cor, type='l'
+               , scales=list(y=list(log="e"))
+       , panel=function(...) {panel.xyplot(...)
+                              panel.grid(h=-1, v=-1, ...)}
+       , main="Comparing similarity measures")
+obj2 <- xyplot(I((rw_ab_cor+1)/2)  ~ gyear| ts, rw_cor, type='l')
+doubleYScale(obj1, obj2, text = c("E.dist. relativeRW", "scaled_localCor"), add.ylab2 = TRUE, main="Comparing similarity measures")
+```
+
+
+
+## Evaluation of 'RW correction estimation' effectivenes trough simulation
+Ring width series from sections that appear complete are corrupted randomly Inserting a ring on side 'a' or deleting a ring on side 'b'. Known corruptions are compared 'EstimateRWcorrections' output to evaluate procedure effectiveness.
+
+```{r}
+library(plyr)
+library(splus2R)  # for 'peaks'
+source("F_EditTreeRingWidthSeries.R")
+source("F_EstimateRWScorrection.R")
+source("F_localCor.R")
+rw_ok <- sqldf("select A.* from rw_all A natural join Sects_sy where max_b_year = 2017
+               order by TreeId, SectId, side, gyear")
+# ok = complete couples of series 'a' and 'b'
+ts <- with(rw_ok, paste(TreeId, SectId, sep="-"))
+rw_ok_c <- data.frame()  # _c : corrupted
+for (tsi in unique(ts)) {               ## debugging limitation
+  year1 <- min(rw_ok$gyear[ts==tsi])
+  side_a <- rw_ok$rw[ts==tsi & rw_ok$side=='a']
+  side_b <- rw_ok$rw[ts==tsi & rw_ok$side=='b']
+  N <- length(side_a)
+  yearN <- year1 + N -1
+  rep <- 5  ## 10            debugging limitation
+  for (y in sample(year1:yearN,rep)) {
+    rw_ok_c <- rbind(rw_ok_c, data.frame(ts=tsi, my=y, mt='I', side='a', gyear=year1:(yearN+1)
+                                         , rw=EditTreeRingWidthSeries('I', y, side_a, year1)))
+    rw_ok_c <- rbind(rw_ok_c, data.frame(ts=tsi, my=y, mt='I', side='b', gyear=year1:(yearN)
+                                         , rw=side_b))
+  }
+  for (y in sample(year1:(yearN-1),rep)) {
+    rw_ok_c <- rbind(rw_ok_c, data.frame(ts=tsi, my=y, mt='D', side='a', gyear=year1:(yearN)
+                                         , rw=side_a))
+    rw_ok_c <- rbind(rw_ok_c, data.frame(ts=tsi, my=y, mt='D', side='b', gyear=year1:(yearN-1)
+                                         , rw=EditTreeRingWidthSeries('D', y, side_b, year1)))
+  }
+}
+# corrupted series computed, start estimating corrections
+start_time <- Sys.time()
+rw_ok_c$rrw <- rw_ok_c$rw / 
+  merge(rw_ok_c, ddply(rw_ok_c, names(rw_ok_c)[1:4], summarise, side_width=sum(rw)))$side_width
+myf <- function(tab) {
+  # print(str(tab))
+  year1 <- min(tab$gyear)
+  ls <- tab$rrw[tab$side=='a']  # LongSeries
+  ss <- tab$rrw[tab$side=='b']  # ShortSeries (len=N-1)
+  tmp <- EstimateRWScorrection2(ls, ss, year1)
+  if (anyNA(tmp)) {
+    z <- with(tmp, sum(is.na(edit_y) & order==1))
+    if (z) {
+      print(summary(tab))
+      stop(" NA from 'Estimate..' in 'order'==1")
+    } 
+    tmp <- tmp[!is.na(tmp$edit_y),]
+    print(" 'Estimate..' generated some NA in 'order'==2")
+  }
+  return(tmp)
+}
+EstCorr <- ddply(rw_ok_c, names(rw_ok_c)[1:3], .fun=myf, .progress = "tk")
+end_time <- Sys.time()
+print(paste("start:", start_time, "- end:", end_time, "- Time elapsed:", end_time - start_time))
+
+EstCorr <- within(EstCorr, matchingEst <- my == edit_y & mt == proposed_e)
+combinations <- with(EstCorr, paste(ts, mt, my, sep = "-"))
+n_comb <- length(unique(combinations))
+n_comb_with_no_match <- sum(table(EstCorr$matchingEst, combinations)[2,]==0)
+print(paste("Out of", n_comb, "combinations , ", n_comb-n_comb_with_no_match, "have at least one match and", n_comb_with_no_match, "haven't been matched by any criterion!"))
+
+MEC <- EstCorr[EstCorr$matchingEst,]
+with(MEC, table(crit, order))
+
+CA1M <- merge(EstCorr[EstCorr$crit=='cr' & EstCorr$proposed_e=='D',], MEC[,1:3])
+# Combinations with at least one match
+
+with(CA1M, table(order,mt))
+
+tmp< 
+```
+
+## Estimate correction on real data
+
+## Sequential evaluation of insertions and delitions on sections with 'one year difference' sides
+```{r}
+library(splus2R)  # for 'peaks'
+source("F_EditTreeRingWidthSeries.R")
+source("F_EstimateRWScorrection.R")
+source("F_localCor.R")
+
+tmp <- sqldf("select A.* from rw_all A natural join Sects_sy where max_b_year = 2016
+             order by TreeId, SectId, side, gyear")
+# Sections with 1 year ring difference between the two sides
+
+rw_1yd <- sqldf("select A.*, A.rw/series_width rrw from tmp A natural join (select TreeId, SectId, side, sum(rw) series_width from tmp group by TreeId, SectId, side)")
+# Compute relative 'ring width'
+
+start_time <- Sys.time()
+pcsim <- data.frame()
+ts <- with(rw_1yd, paste(TreeId, SectId, sep="-"))
+for (i in unique(ts)) {
+  cat(i)
+  year1 <- min(rw_1yd$gyear[ts==i])
+  ls <- rw_1yd$rrw[ts==i & rw_1yd$side=='a']  # LongSeries
+  ss <- rw_1yd$rrw[ts==i & rw_1yd$side=='b']  # ShortSeries (len=N-1)
+  pcsim <- rbind(pcsim, data.frame(TreeSection=i
+                                  , EstimateRWScorrection(ls, ss, year1)))
+}
+end_time <- Sys.time()
+print(paste("start:", start_time, "- end:", end_time, "- Time elapsed:", end_time - start_time))
+pcsim[,c("TreeSection","modify_y","how")]
+
+library(googlesheets)
+suppressMessages(library(dplyr))
+gsn <- "RotelleVer3"
+gsurl <- "https://docs.google.com/spreadsheets/d/19QBPUmwnREaTlZ5Zbw46askcnmPSwc6wW17UELbhmBg/edit#gid=2034395174"
+gs_ls(gsn)
+Rv3 <- gs_url(gsurl)
+# Rv3 <- Rv3 %>% gs_ws_new(ws_title = "CorrezioniProposte", input = pcsim)
+
+```
+
+## Istruzioni per l'uso  [in ver.00, da rivedere per ver.01!!!!!!!]
+
+La tabella prodotta ('CorrezioniProposte', file:'RotelleVer3') espone il risultato dell'analisi effettuata su tutte le rotelle teoricamente complete sui due lati, che però presentano, sul lato 'b', un anello in meno che sul lato 'a' (oppure, equivalentemente, un anello di troppo sul lato 'a').
+
+ TeeeSector  modify_y   how
+  1-1	        1971	    :cdI1:cdD2	
+  1-1	        1995	    :cdI2:cdD1	
+  1-1	        1996	    :crI2	
+  1-1	        2010	    :crI1	
+  1-2	        1985	    :cdD1	
+  1-2	        1994	    :cdI1:cdD2
+  ......
+
+Come puoi vedere nello spezzone di tabella riportato come esempio qui sopra, per ogni rotella (individuata con la sigla "TreeSection", Fusto-Rotella) vengono presentate diverse possibili opzioni, tra loro alternative, di correzione della sequenza delle misurazioni effettuate.  
+La colonna 'modify_y' individua su quale anello intervenire,  
+la colonna 'how' specifica il tipo di correzzione proposto.
+I codici utilizzati nella colonna 'how' hanno i seguenti significati.  
+I due punti ":" iniziano una proposta, in molti casi c'è più di una proposta di intervento relativa allo stesso anello (anno).  
+Le lettere maiuscole "I" e "D" indicano rispettivamento 'Insertion' e 'Delition'.  
+Le due lettere minuscole iniziali indicano il criterio in base al quale si è ottenuta l'indicazione presentata: "cd" è quello analogo al DTW (basato sulle distanze punto-punto), "cr" è un criterio originale basato sulla 'correlazione locale tra segmenti di serie'.  
+Infine, il numero in chiusura indica la priorità:  
+1 = prima opzione da considerare (per quella correzione in base a quel criterio),  
+2 = seconda opzione da considerare.
+
+In pratica
+
+Delle rotelle considerate in questa tabella prenderne alcune, casualmente, fra quelle che si possono rileggere almeno sulla foto, se non dal vivo. (Se è possibile arrivare a 30 rotelle sarebbe ideale)
+Per ciscuna di queste, aiutandosi con la tabella di registarazione delle misurazioni(^1), individuare gli anelli corrispondenti agli anni selezionati dall'analisi ('modify_y').
+Se 'how' contiene una 'I', esaminare il lato 'b' e valutare se, in effetti, giusto prima dell'anello considerato c èra stato saltato un anello nelle misurazioni registrate.  
+Se 'how' contiene una 'D', esaminare il lato 'a' e valutare se, in effetti, la misurazione relativa all'anno individuato non corrisponde ad un anello effettivo e sarebbe quindi da eliminare.  
+Valutata la situazione per tutti gli anni selezionati dall'analisi scegliere quale delle correzioni proposte è la più convincente e registrare la scelta in una colonna aggiuntiva, replicando la sigla dell'intervento. (^2)
+
+(^1) La tabella da utilizzare quella nel foglio 'DatabaseV2' del tabellone Google 'RotelleVer2' raggiungibile all'indirizzo https://docs.google.com/spreadsheets/d/15ZLnI780oKr4QKuc4k4UAwZ6w6YmEE8tj4c2sU44xLQ/edit#gid=1996889235
+In questa tabella puoi inserire commenti ma non puoi modificare i dati. Se ti è più comodo puoi utilizzare una copia in formato Excel di quel tabellone (ne inivio una io).
+
+(^2) Ho preparato un tabellone con la colonna dove replicare il codice della correzione che hai valutato migliore per ciascuna delle sezioni che potrai esaminare. La trovi all'indirizzo https://docs.google.com/spreadsheets/d/19QBPUmwnREaTlZ5Zbw46askcnmPSwc6wW17UELbhmBg/edit#gid=2034395174 (Se non è possibile inserire i risultati della tua analisi su questo tabellone in rete, invio copia in Excel)
